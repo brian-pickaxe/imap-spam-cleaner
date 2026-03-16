@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dominicgisler/imap-spam-cleaner/app"
 	"github.com/dominicgisler/imap-spam-cleaner/config"
@@ -63,7 +64,6 @@ func RunAllInboxes(ctx app.Context) {
 func processInbox(ctx app.Context, inbox config.Inbox, prov config.Provider) {
 
 	var err error
-	var msgs []imap.Message
 	var p provider.Provider
 	var im *imap.Imap
 	var n int
@@ -74,63 +74,67 @@ func processInbox(ctx app.Context, inbox config.Inbox, prov config.Provider) {
 		logx.Errorf("Could not load imap: %v\n", err)
 		return
 	}
-
-	if msgs, err = im.LoadMessages(); err != nil {
-		logx.Errorf("Could not load messages: %v\n", err)
-		im.Close()
-		return
-	}
-	logx.Infof("Loaded %d messages", len(msgs))
+	defer im.Close()
 
 	p, err = provider.New(prov.Type)
 	if err != nil {
 		logx.Errorf("Could not load provider: %v\n", err)
-		im.Close()
 		return
 	}
 
 	if err = p.Init(prov.Config); err != nil {
 		logx.Errorf("Could not init provider: %v\n", err)
-		im.Close()
 		return
 	}
 
 	moved := 0
-	for _, m := range msgs {
-		if wl, ok := ctx.Config.Whitelists[inbox.Whitelist]; ok {
-			trustedSender := false
-			for _, rgx := range wl {
-				if rgx.Match([]byte(m.From)) {
-					trustedSender = true
-					break
+	batchSize := inbox.BatchSize
+	if batchSize <= 0 {
+		batchSize = imap.DefaultBatchSize
+	}
+	total, err := im.ProcessBatches(batchSize, func(msgs []imap.Message, offset, totalCount int) error {
+		for i, m := range msgs {
+			status := offset + i + 1
+			if wl, ok := ctx.Config.Whitelists[inbox.Whitelist]; ok {
+				trustedSender := false
+				for _, rgx := range wl {
+					if rgx.Match([]byte(m.From)) {
+						trustedSender = true
+						break
+					}
+				}
+				if trustedSender {
+					logx.Debugf("message %d/%d Skipping message #%d (%s) because of trusted sender (%s) date=%s size=%d", status, totalCount, m.UID, m.Subject, m.From, m.Date.Format(time.RFC3339), len(m.Raw))
+					continue
 				}
 			}
-			if trustedSender {
-				logx.Debugf("Skipping message #%d (%s) because of trusted sender (%s)", m.UID, m.Subject, m.From)
+
+			if n, err = p.Analyze(m); err != nil {
+				logx.Errorf("Could not analyze message (%s): %v\n", m.Subject, err)
 				continue
 			}
-		}
+			logx.Debugf("message %d/%d Spam score of message #%d (%s): %d/100 date=%s size=%d", status, totalCount, m.UID, m.Subject, n, m.Date.Format(time.RFC3339), len(m.Raw))
 
-		if n, err = p.Analyze(m); err != nil {
-			logx.Errorf("Could not analyze message (%s): %v\n", m.Subject, err)
-			continue
-		}
-		logx.Debugf("Spam score of message #%d (%s): %d/100", m.UID, m.Subject, n)
+			if n >= inbox.MinScore {
+				if ctx.Options.AnalyzeOnly {
+					logx.Debugf("message %d/%d Analyze only mode, not moving message #%d date=%s size=%d", status, totalCount, m.UID, m.Date.Format(time.RFC3339), len(m.Raw))
+					continue
+				}
 
-		if n >= inbox.MinScore {
-			if ctx.Options.AnalyzeOnly {
-				logx.Debugf("Analyze only mode, not moving message #%d", m.UID)
-				continue
+				if err = im.MoveMessage(m.UID, inbox.Spam); err != nil {
+					logx.Errorf("Could not move message (%s): %v\n", m.Subject, err)
+					continue
+				}
+				moved++
 			}
-
-			if err = im.MoveMessage(m.UID, inbox.Spam); err != nil {
-				logx.Errorf("Could not move message (%s): %v\n", m.Subject, err)
-				continue
-			}
-			moved++
 		}
+		return nil
+	})
+	if err != nil {
+		logx.Errorf("Could not process messages: %v\n", err)
+		return
 	}
-	logx.Infof("Moved %d messages", moved)
 
-	im.Close()
+	logx.Infof("Loaded %d messages", total)
+	logx.Infof("Moved %d messages", moved)
 }

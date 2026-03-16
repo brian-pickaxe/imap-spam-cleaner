@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"text/template"
+	"time"
 
 	"github.com/dominicgisler/imap-spam-cleaner/imap"
 	"github.com/dominicgisler/imap-spam-cleaner/logx"
@@ -62,7 +63,7 @@ func (p *AIBase) buildPrompt(msg imap.Message) (string, error) {
 	for _, cnt := range msg.Contents {
 		contLen += len(cnt)
 		if contLen > p.maxsize {
-			logx.Debugf("skipping bytes for message #%d (%s)", msg.UID, msg.Subject)
+			logx.Debugf("skipping bytes for message #%d (%s) date=%s size=%d", msg.UID, msg.Subject, msg.Date.Format(time.RFC3339), len(msg.Raw))
 			break
 		}
 		cont += cnt + "\n"

@@ -57,3 +57,4 @@ inboxes:                          # inboxes to be checked
     minage: 0h                    # min age of message
     maxage: 24h                   # max age of message
     whitelist: whitelist1         # whitelist to use, empty/missing = no whitelist
+    # batchsize: 500              # messages per fetch batch (optional, default 500); use for large mailboxes
