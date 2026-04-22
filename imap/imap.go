@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/dominicgisler/imap-spam-cleaner/config"
@@ -281,6 +282,66 @@ func (i *Imap) MoveMessage(uid imap.UID, mailbox string) error {
 	uidSet.AddNum(uid)
 	if _, err := i.client.Move(uidSet, mailbox).Wait(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// PrependSubjectTerm inserts term at the start of the Subject header value in raw RFC822.
+// Returns nil if no Subject header is found. Caller should use original raw in that case.
+func PrependSubjectTerm(raw []byte, term string) []byte {
+	if term == "" {
+		return raw
+	}
+	// Find "Subject:" case-insensitive (headers can be folded; we only touch the first line).
+	subj := []byte("Subject:")
+	idx := -1
+	for i := 0; i <= len(raw)-len(subj); i++ {
+		if i == 0 || raw[i-1] == '\n' {
+			if strings.EqualFold(string(raw[i:i+len(subj)]), "Subject:") {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	valueStart := idx + len(subj)
+	for valueStart < len(raw) && (raw[valueStart] == ' ' || raw[valueStart] == '\t') {
+		valueStart++
+	}
+	// Insert term at valueStart
+	out := make([]byte, 0, len(raw)+len(term))
+	out = append(out, raw[:valueStart]...)
+	out = append(out, term...)
+	out = append(out, raw[valueStart:]...)
+	return out
+}
+
+// MoveMessageWithSubject appends modifiedRaw to mailbox then deletes the original message (by uid) from the currently selected mailbox.
+// Use when you have rewritten the message (e.g. Subject) and want to "move" it instead of a plain copy.
+func (i *Imap) MoveMessageWithSubject(uid imap.UID, mailbox string, modifiedRaw []byte) error {
+	appendCmd := i.client.Append(mailbox, int64(len(modifiedRaw)), nil)
+	if _, err := appendCmd.Write(modifiedRaw); err != nil {
+		return fmt.Errorf("append write: %w", err)
+	}
+	if err := appendCmd.Close(); err != nil {
+		return fmt.Errorf("append close: %w", err)
+	}
+	if _, err := appendCmd.Wait(); err != nil {
+		return fmt.Errorf("append: %w", err)
+	}
+	uidSet := imap.UIDSet{}
+	uidSet.AddNum(uid)
+	if err := i.client.Store(uidSet, &imap.StoreFlags{
+		Op:     imap.StoreFlagsAdd,
+		Silent: true,
+		Flags:  []imap.Flag{imap.FlagDeleted},
+	}, nil).Close(); err != nil {
+		return fmt.Errorf("store deleted: %w", err)
+	}
+	if err := i.client.UIDExpunge(uidSet).Close(); err != nil {
+		return fmt.Errorf("expunge: %w", err)
 	}
 	return nil
 }

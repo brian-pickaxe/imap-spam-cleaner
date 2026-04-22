@@ -1,8 +1,10 @@
 package inbox
 
 import (
+	"bytes"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,17 +105,24 @@ func processInbox(ctx app.Context, inbox config.Inbox, prov config.Provider) {
 						break
 					}
 				}
-				if trustedSender {
-					logx.Debugf("message %d/%d Skipping message #%d (%s) because of trusted sender (%s) date=%s size=%d", status, totalCount, m.UID, m.Subject, m.From, m.Date.Format(time.RFC3339), len(m.Raw))
-					continue
-				}
-			}
-
-			if n, err = p.Analyze(m); err != nil {
-				logx.Errorf("Could not analyze message (%s): %v\n", m.Subject, err)
+			if trustedSender {
+				logx.Debugf("message %d/%d Skipping message #%d (%s) because of trusted sender (%s) date=%s size=%d", status, totalCount, m.UID, m.Subject, m.From, m.Date.Format(time.RFC3339), len(m.Raw))
 				continue
 			}
-			logx.Debugf("message %d/%d Spam score of message #%d (%s): %d/100 date=%s size=%d", status, totalCount, m.UID, m.Subject, n, m.Date.Format(time.RFC3339), len(m.Raw))
+		}
+
+			// If any header_spam_terms match in the headers, treat as spam and skip the provider.
+			headerMatched := len(inbox.HeaderSpamTerms) > 0 && headersContainAny(m.Raw, inbox.HeaderSpamTerms)
+			if headerMatched {
+				n = 100
+				logx.Debugf("message %d/%d Spam score of message #%d (%s): %s (header match, skipped scan) date=%s size=%d", status, totalCount, m.UID, m.Subject, logx.ColorScore(n), m.Date.Format(time.RFC3339), len(m.Raw))
+			} else {
+				if n, err = p.Analyze(m); err != nil {
+					logx.Errorf("Could not analyze message (%s): %v\n", m.Subject, err)
+					continue
+				}
+				logx.Debugf("message %d/%d Spam score of message #%d (%s): %s date=%s size=%d", status, totalCount, m.UID, m.Subject, logx.ColorScore(n), m.Date.Format(time.RFC3339), len(m.Raw))
+			}
 
 			if n >= inbox.MinScore {
 				if ctx.Options.AnalyzeOnly {
@@ -121,9 +130,31 @@ func processInbox(ctx app.Context, inbox config.Inbox, prov config.Provider) {
 					continue
 				}
 
-				if err = im.MoveMessage(m.UID, inbox.Spam); err != nil {
-					logx.Errorf("Could not move message (%s): %v\n", m.Subject, err)
-					continue
+				// Subject term: header-matched spam uses header_spam_subject_term; high provider score uses high_spam_subject_term.
+				var subjectTerm string
+				if headerMatched && inbox.HeaderSpamSubjectTerm != "" {
+					subjectTerm = inbox.HeaderSpamSubjectTerm
+				} else if inbox.HighSpamSubjectTerm != "" && inbox.HighSpamScore > 0 && n >= inbox.HighSpamScore {
+					subjectTerm = inbox.HighSpamSubjectTerm
+				}
+				if subjectTerm != "" {
+					modifiedRaw := imap.PrependSubjectTerm(m.Raw, subjectTerm)
+					if modifiedRaw != nil {
+						if err = im.MoveMessageWithSubject(m.UID, inbox.Spam, modifiedRaw); err != nil {
+							logx.Errorf("Could not move message with subject (%s): %v\n", m.Subject, err)
+							continue
+						}
+					} else {
+						if err = im.MoveMessage(m.UID, inbox.Spam); err != nil {
+							logx.Errorf("Could not move message (%s): %v\n", m.Subject, err)
+							continue
+						}
+					}
+				} else {
+					if err = im.MoveMessage(m.UID, inbox.Spam); err != nil {
+						logx.Errorf("Could not move message (%s): %v\n", m.Subject, err)
+						continue
+					}
 				}
 				moved++
 			}
@@ -137,4 +168,25 @@ func processInbox(ctx app.Context, inbox config.Inbox, prov config.Provider) {
 
 	logx.Infof("Loaded %d messages", total)
 	logx.Infof("Moved %d messages", moved)
+}
+
+// headersContainAny returns true if any of the terms appear in the RFC822 header section (case-insensitive).
+func headersContainAny(raw []byte, terms []string) bool {
+	// Headers end at first blank line.
+	sep := []byte("\r\n\r\n")
+	if i := bytes.Index(raw, sep); i >= 0 {
+		raw = raw[:i]
+	} else if i := bytes.Index(raw, []byte("\n\n")); i >= 0 {
+		raw = raw[:i]
+	}
+	lower := strings.ToLower(string(raw))
+	for _, t := range terms {
+		if t == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(t)) {
+			return true
+		}
+	}
+	return false
 }

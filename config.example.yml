@@ -58,3 +58,9 @@ inboxes:                          # inboxes to be checked
     maxage: 24h                   # max age of message
     whitelist: whitelist1         # whitelist to use, empty/missing = no whitelist
     # batchsize: 500              # messages per fetch batch (optional, default 500); use for large mailboxes
+    # high_spam_score: 90         # when score >= this, prepend high_spam_subject_term to Subject (optional)
+    # high_spam_subject_term: "[SPAM] "  # term to prepend to Subject for high-spam messages (optional)
+    # header_spam_terms:          # if any term appears in message headers (case-insensitive), treat as spam and skip provider
+    #   - "X-Spam-Flag: YES"
+    #   - "X-Spam-Status: Yes"
+    # header_spam_subject_term: "[Auto] "  # prepend to Subject when moving header-matched spam (optional)

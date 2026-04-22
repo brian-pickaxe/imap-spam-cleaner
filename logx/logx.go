@@ -1,10 +1,45 @@
 package logx
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/sirupsen/logrus"
 )
+
+// ANSI color codes for terminal output (only used when stdout is a TTY).
+const (
+	ansiReset  = "\033[0m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiRed    = "\033[31m"
+)
+
+// ColorScore returns "score/100" with the number colored by severity: green (low), yellow (mid), red (high).
+// When stdout is not a TTY, returns plain "score/100" with no escape codes.
+func ColorScore(score int) string {
+	if !isTerminal() {
+		return fmt.Sprintf("%d/100", score)
+	}
+	var c string
+	switch {
+	case score < 40:
+		c = ansiGreen
+	case score < 70:
+		c = ansiYellow
+	default:
+		c = ansiRed
+	}
+	return c + fmt.Sprintf("%d", score) + ansiReset + "/100"
+}
+
+func isTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
 
 var logger *logrus.Logger
 

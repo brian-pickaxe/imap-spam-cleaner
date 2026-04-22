@@ -44,6 +44,13 @@ type Inbox struct {
 	MaxAge    time.Duration `yaml:"maxage"    validate:"omitempty"`
 	Whitelist string        `yaml:"whitelist" validate:"omitempty"`
 	BatchSize int           `yaml:"batchsize" validate:"omitempty,gte=0"`
+	// When score >= HighSpamScore and HighSpamSubjectTerm is set, the term is prepended to Subject when moving to spam.
+	HighSpamScore       int    `yaml:"high_spam_score"       validate:"omitempty,gte=0,lte=100"`
+	HighSpamSubjectTerm string `yaml:"high_spam_subject_term" validate:"omitempty"`
+	// If any of these terms appear in the message headers (case-insensitive), the message is treated as spam and the provider is not called.
+	HeaderSpamTerms []string `yaml:"header_spam_terms" validate:"omitempty"`
+	// When moving a header-matched spam message, prepend this to the Subject (optional). If empty, no subject change for header match.
+	HeaderSpamSubjectTerm string `yaml:"header_spam_subject_term" validate:"omitempty"`
 }
 
 func Load() (*Config, error) {
