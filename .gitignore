@@ -1,2 +1,6 @@
 .idea/
 config.yml
+nohup.out
+unsubscribe-junk
+imap-spam-cleaner
+venv
