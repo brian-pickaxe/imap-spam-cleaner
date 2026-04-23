@@ -117,7 +117,7 @@ providers:                        # providers to be used for inboxes
     type: ollama                  # provider type
     config:                       # provider specific configuration
       url: http://127.0.0.1:11434 # ollama url
-      model: gpt-oss:20b          # ollama model to use
+      model: frob/kimi-k2.5:latest  # ollama: local Kimi K2.5 (official K2.6 is cloud-only)
       maxsize: 100000             # message size limit for prompt (bytes)
   prov3:                          # provider name
     type: spamassassin            # provider type

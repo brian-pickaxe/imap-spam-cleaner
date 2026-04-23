@@ -25,8 +25,9 @@ providers:                        # providers to be used for inboxes
     type: ollama                  # provider type
     config:                       # provider specific configuration
       url: http://127.0.0.1:11434 # url
-      model: gpt-oss:20b          # model to use
+      model: qwen2.5:32b          # model to use
       maxsize: 100000             # message size limit for prompt (bytes)
+      timeout: 10m                # optional: HTTP timeout per request (default 10m); e.g. 5m, 90s, or 300 (seconds)
   prov3:                          # provider name
     type: spamassassin            # provider type
     config:                       # provider specific configuration
